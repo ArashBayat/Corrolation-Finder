@@ -314,7 +314,6 @@ private:
 		}
 		// finally store the tree
 		StoreTree();
-		Printf(".");
 		return;
 	}
 
@@ -340,7 +339,8 @@ private:
 			// for all samples count classes in table
 			tbl_idx[i] = ((node_id[i] * ord_class) + sample_class[i]);
 		}
-
+//#define NO_TBALE
+#ifndef NO_TABLE
 		// TO BE IMPROVED using SSE instruction
 		for (uint i = 0; i<num_sample; i++)
 		{
@@ -348,14 +348,18 @@ private:
 			// for all samples count classes in table
 			table[tbl_idx[i]]++;
 		}
-
+#endif
 		// the number of node is changed now
 		num_node = num_node_next;
 
 		// compute purity of the sample at the current depth of tree
 		tree[depth].purity = 0;
-
+#ifdef NO_TABLE
+		for (uint i = 0; i < num_node; i++)
+			tree[depth].purity += node_id[i];
+#endif
 		// for each node
+#ifndef NO_TABLE
 		for (uint i = 0; i<num_node; i++)
 		{
 			uint start_idx = i * ord_class;
@@ -379,6 +383,7 @@ private:
 				tree[depth].purity += (sum / num_sample) * node_purity;
 			}
 		}
+#endif
 		PrintfD("\n var_id %u Purity %f", tree[depth].var_id, tree[depth].purity);
 		// increase the depth of the tree
 		depth++;
