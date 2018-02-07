@@ -245,14 +245,20 @@ private:
 	uint num_var;				// total number of variable in data set
 	MEMORY_PLAN memory_plan;
 	UNCOMPRESSED_MEMORY *uncompressed_memory;
-
+//#define NO_RANDOM
+#ifdef NO_RANDOM
+	uint rnd;
+#endif
 	void TakeRandomVariable()
 	{
+#ifndef NO_RANDOM
 		// select a random variable
 		uint rnd = (uint)(rand());
 		rnd *= (uint)(rand());
 		rnd %= num_var;
-
+#else
+		uint rnd = (rnd * 2367486) % num_var;
+#endif
 		// based on memory plan load variable data
 		switch (memory_plan)
 		{
@@ -349,17 +355,18 @@ private:
 			table[tbl_idx[i]]++;
 		}
 #endif
-		// the number of node is changed now
-		num_node = num_node_next;
-
 		// compute purity of the sample at the current depth of tree
 		tree[depth].purity = 0;
+
 #ifdef NO_TABLE
 		for (uint i = 0; i < num_node; i++)
 			tree[depth].purity += node_id[i];
 #endif
-		// for each node
+		// the number of node is changed now
+		num_node = num_node_next;
+
 #ifndef NO_TABLE
+		// for each node
 		for (uint i = 0; i<num_node; i++)
 		{
 			uint start_idx = i * ord_class;
