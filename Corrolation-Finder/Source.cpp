@@ -314,7 +314,6 @@ private:
 		}
 		// finally store the tree
 		StoreTree();
-		Printf(".");
 		return;
 	}
 
@@ -323,7 +322,7 @@ private:
 	{
 		NODE_ID num_node_next = num_node * tree[depth].ord_var; // number of nodes after splitting samples by the selected variable
 
-																// clear table to count samples split by the selected variable
+		// clear table to count samples split by the selected variable
 		memset((char *)table, 0, (num_node_next * ord_class * sizeof(SAMPLE_COUNTER)));
 
 		// TO BE IMPROVED using SSE instruction
@@ -349,14 +348,11 @@ private:
 			table[tbl_idx[i]]++;
 		}
 
-		// the number of node is changed now
-		num_node = num_node_next;
-
 		// compute purity of the sample at the current depth of tree
 		tree[depth].purity = 0;
 
 		// for each node
-		for (uint i = 0; i<num_node; i++)
+		for (uint i = 0; i<num_node_next; i++)
 		{
 			uint start_idx = i * ord_class;
 			uint end_idx = start_idx + ord_class;
@@ -379,9 +375,14 @@ private:
 				tree[depth].purity += (sum / num_sample) * node_purity;
 			}
 		}
+		
 		PrintfD("\n var_id %u Purity %f", tree[depth].var_id, tree[depth].purity);
+		
 		// increase the depth of the tree
 		depth++;
+
+		// the number of node is changed now
+		num_node = num_node_next;
 
 		return;
 	}
@@ -391,47 +392,47 @@ int main(int argc, char *argv[])
 {
 	if (argc<2)
 	{
-		printf(">>> Usage: %s R/A (R for random dataset Generation/ A for analysis)\n", argv[0]);
+		printf(">>> Usage: %s G/A (G for random dataset Generation/ A for analysis)\n", argv[0]);
 		return 0;
 	}
 	switch (argv[1][0])
 	{
-	case 'G':
-	{
-		if (argc<4)
+		case 'G':
 		{
-			printf(">>> Usage: %s R num_var num_samples file_name(ord_var is 3, ord_class is 2)\n", argv[0]);
-			return 0;
+			if (argc<4)
+			{
+				printf(">>> Usage: %s G num_var num_samples file_name(ord_var is 3, ord_class is 2)\n", argv[0]);
+				return 0;
+			}
+			Printf("\nSimulation Started.");
+			uint num_var = atoi(argv[2]);
+			uint num_sample = atoi(argv[3]);
+			UNCOMPRESSED_MEMORY vds;
+			vds.FillRandom(num_var, num_sample, 3);
+			vds.StoreToFile(argv[4]);
+			Printf("\nSimulation End.");
+			break;
 		}
-		Printf("\nSimulation Started.");
-		uint num_var = atoi(argv[2]);
-		uint num_sample = atoi(argv[3]);
-		UNCOMPRESSED_MEMORY vds;
-		vds.FillRandom(num_var, num_sample, 3);
-		vds.StoreToFile(argv[4]);
-		Printf("\nSimulation End.");
-		break;
-	}
-	case 'A':
-	{
-		if (argc<7)
+		case 'A':
 		{
-			printf(">>> Usage: %s A file_name max_depth tree_per_file num_tree tree_file_prefix\n", argv[0]);
-			return 0;
+			if (argc<7)
+			{
+				printf(">>> Usage: %s A file_name max_depth tree_per_file num_tree tree_file_prefix\n", argv[0]);
+				return 0;
+			}
+			UNCOMPRESSED_MEMORY vds;
+			vds.LoadFromFile(argv[2]);
+			CORE core;
+			uint thread_id = 0;
+			core.Init(vds.num_sample, vds.sample_class, 2, atoi(argv[3]), atoi(argv[4]), vds.num_var, 3, memory, &vds, argv[6], thread_id);
+			Printf("\nBuilding Forest ");
+			core.BuildForest(atoi(argv[5]));
+			break;
 		}
-		UNCOMPRESSED_MEMORY vds;
-		vds.LoadFromFile(argv[2]);
-		CORE core;
-		uint thread_id = 0;
-		core.Init(vds.num_sample, vds.sample_class, 2, atoi(argv[3]), atoi(argv[4]), vds.num_var, 3, memory, &vds, argv[6], thread_id);
-		Printf("\nBuilding Forest ");
-		core.BuildForest(atoi(argv[5]));
-		break;
-	}
-	default:
-	{
-		printf(">>> Usage: %s R/A (R for random dataset Generation/ A for analysis)\n", argv[0]);
-	}
+		default:
+		{
+			printf(">>> Usage: %s G/A (G for random dataset Generation/ A for analysis)\n", argv[0]);
+		}
 	}
 	Printf("\n");
 	return 0;
