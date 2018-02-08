@@ -394,7 +394,7 @@ private:
 	}
 };
 
-void UniqueCombination(uint setSize, uint subsetSize, char printTree)
+void UniqueCombination(uint setSize, uint subsetSize, char printTree) 
 {
 	printf("\n >> %d\t%d", setSize, subsetSize);
 
