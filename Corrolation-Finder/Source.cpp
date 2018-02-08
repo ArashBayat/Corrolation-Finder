@@ -2,8 +2,9 @@
 * Core.cpp
 *
 *  Created on: 1 Feb. 2018
-*      Author: bay041
+*      Author: Arash Bayat
 */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +14,7 @@
 #define Printf printf
 //#define PrintfD printf
 #define PrintfD DO_NOTHING
+
 void DO_NOTHING(const char *x, ...)
 {
 	return;
@@ -312,6 +314,10 @@ private:
 			TakeRandomVariable();
 			SplitAndComputePurity();
 		}
+		// print the purity of tree
+		//printf("\n");
+		//for (uint i = 0; i < max_depth; i++)
+		//	printf("%5.3f\t", tree[i].purity);
 		// finally store the tree
 		StoreTree();
 		return;
@@ -388,11 +394,98 @@ private:
 	}
 };
 
+void UniqueCombination(uint setSize, uint subsetSize, char printTree)
+{
+	printf("\n >> %d\t%d", setSize, subsetSize);
+
+	char *table = new char[setSize*setSize];
+	memset(table, 0, setSize*setSize);
+#define TABLE(I,J)	table[(I*setSize)+J]
+	uint *subset = new uint[subsetSize];
+
+	uint treeCNT = 0;
+	uint ofs = 0;
+	uint depth = 0;
+
+	while (true)
+	{
+		uint i = ofs;
+		for (; i < setSize;)
+		{
+			// allocate the first element in the subset
+			if (depth == 0)
+			{
+				subset[depth] = i;
+				depth++;
+				i++;
+				continue;
+			}
+
+			// for each of the next item first check if repeat exist
+			char flag = 0;
+			for (int j = 0; j < depth; j++)
+				flag |= TABLE(subset[j], i);
+			// if repeat exist check for next element
+			if (flag)
+			{
+				i++;
+				continue;
+			}
+			else // if there where no repeat
+			{
+				// flag all new repeats
+				for (int j = 0; j < depth; j++)
+					TABLE(subset[j], i) = 1;
+
+				// add new element into subset
+				subset[depth] = i;
+				i++;
+				depth++;
+				// if enough three is filled print it out
+				if (depth == subsetSize)
+				{
+					treeCNT++;
+					if (printTree == 'Y')
+					{
+						printf("\n");
+						for (int k = 0; k < depth; k++)
+							printf("%u\t", subset[k]);
+					}
+					//and also reset for building new tree
+					depth = 0;
+					i = ofs;
+				}
+			}
+		}
+		// when we exit from this loop it means the first element (ofs) have repeat withe all other element (except afew that can not make a compelte tree)
+		// print the last tree if exist
+		if (depth > 1)
+		{
+			treeCNT++;
+			if (printTree == 'Y')
+			{
+				printf("\n");
+				for (int k = 0; k < depth; k++)
+					printf("%u\t", subset[k]);
+			}
+		}
+		ofs++;
+		depth = 0;
+		if (ofs >= setSize)
+			break;
+	}
+	printf("\n>>> Tree Count: %u\n", treeCNT);
+	delete[] table;
+}
+
 int main(int argc, char *argv[])
 {
 	if (argc<2)
 	{
-		printf(">>> Usage: %s G/A (G for random dataset Generation/ A for analysis)\n", argv[0]);
+		printf(">>> Usage: %s G/A/U\n", argv[0]);
+		printf(">>> G: random dataset Generation\n");
+		printf(">>> A: Analysis\n");
+		printf(">>> U: Unique combinations\n");
 		return 0;
 	}
 	switch (argv[1][0])
@@ -427,6 +520,16 @@ int main(int argc, char *argv[])
 			core.Init(vds.num_sample, vds.sample_class, 2, atoi(argv[3]), atoi(argv[4]), vds.num_var, 3, memory, &vds, argv[6], thread_id);
 			Printf("\nBuilding Forest ");
 			core.BuildForest(atoi(argv[5]));
+			break;
+		}
+		case 'U':
+		{
+			if (argc<5)
+			{
+				printf(">>> Usage: %s U setSize subsetSize PrintTree(Y/N)\n", argv[0]);
+				return 0;
+			}
+			UniqueCombination(atoi(argv[2]), atoi(argv[3]), argv[4][0]);
 			break;
 		}
 		default:
