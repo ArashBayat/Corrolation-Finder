@@ -5,6 +5,10 @@
 *      Author: Arash Bayat
 */
 
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,16 +39,45 @@ typedef enum
 	RASM						// random access to records with sequential access to file
 } MEMORY_PLAN;
 
+#define MAX_VAR_NAME_LEN 32
+typedef struct
+{
+	double InfoGaind;		// InfoGaind independently by this value
+	double sumInfoGained;	// total amount of InfoGained by this variable in tree
+	uint numInfoGained;		// number of time this varibale is used in forest.
+	char var_name[MAX_VAR_NAME_LEN];
+} VAR_DATA;
+
 typedef struct T_UNCOMPRESSED_MEMORY
 {
 	SAMPLE_COUNTER num_sample;	// number of samples
 	uint num_var;				// number of variables
 
-	VAR_VALUE *data;		// keep value for each variable
-	VAR_ORD *ord;		// ordinallity of each variable
+	VAR_VALUE *data;		// keep value for each variable (it is a 2D array see Get_Var_Value())
+	VAR_ORD *ord;			// ordinallity of each variable
 	SAMPLE_CLASS *sample_class; // class labels for samples
 
-	VAR_VALUE *Get_Var_Value(uint index)
+	uint ord_class;				// Ordinality of classes. How many class exist in total.
+	double sample_purity;		// purity of samples
+	
+	void ComputeSamplePurity()
+	{
+		SAMPLE_COUNTER *cnt = new SAMPLE_COUNTER[ord_class];
+		memset(cnt, 0, sizeof(SAMPLE_COUNTER) * ord_class);
+		for (uint i = 0; i < num_sample; i++)
+		{
+			cnt[sample_class[i]]++;
+		}
+
+		sample_purity = 0;
+		for (uint i = 0; i<ord_class; i++)
+		{
+			double fij = (double)cnt[i] / num_sample; // fraction of sample in node i with class j;
+			sample_purity += (fij * fij);
+		}
+	}
+
+	VAR_VALUE *GetVarValue(uint index)
 	{
 		return &data[index * num_sample];
 	}
@@ -70,6 +103,7 @@ typedef struct T_UNCOMPRESSED_MEMORY
 				data[(i * num_sample) + j] = rand() % ord[i];
 		}
 
+		ord_class = 2;
 		// assign random class for samples
 		for (uint i = 0; i<num_sample; i++)
 			sample_class[i] = rand() % 2;
@@ -118,7 +152,6 @@ typedef struct
 	double purity;	// tree[i].purity=j indicates that the purity of tree in depth 'i' is 'j'.
 } TREE;
 
-
 class CORE
 {
 public:
@@ -146,6 +179,8 @@ public:
 		num_var = 0;
 		memory_plan = memory;
 		uncompressed_memory = NULL;
+		varData = NULL;
+		sample_purity = 0;
 	}
 
 	~CORE()
@@ -158,12 +193,14 @@ public:
 			delete[] table;
 		if (!tree)
 			delete[] tree;
+		if (!varData)
+			delete[] varData;
 
 		if (file_tree) // not to leave output file open
 			fclose(file_tree);
 	}
 
-	void Init(SAMPLE_COUNTER a_num_sample, SAMPLE_CLASS *a_sample_class, uint a_ord_class, uint a_max_depth, uint a_num_tree_per_file, uint a_num_var, uint a_max_var_ord, MEMORY_PLAN a_memory_plan, void *a_dataset, char *prefix, uint a_thread_id)
+	void Init(SAMPLE_COUNTER a_num_sample, SAMPLE_CLASS *a_sample_class, uint a_ord_class, double a_sample_purity, uint a_max_depth, uint a_num_tree_per_file, uint a_num_var, uint a_max_var_ord, MEMORY_PLAN a_memory_plan, void *a_dataset, char *prefix, uint a_thread_id)
 	{
 		num_sample = a_num_sample;
 		sample_class = a_sample_class;
@@ -197,6 +234,11 @@ public:
 		thread_id = a_thread_id;
 
 		num_var = a_num_var;
+
+		varData = new VAR_DATA[num_var];
+
+		sample_purity = a_sample_purity;
+
 		memory_plan = a_memory_plan;
 		switch (memory_plan)
 		{
@@ -213,8 +255,23 @@ public:
 
 	void BuildForest(uint num_tree)
 	{
-		for (int i = 0; i<num_tree; i++)
+		for (uint i = 0; i < num_tree; i++)
+		{
 			BuildTree();
+			StoreTree();
+		}
+	}
+
+	void ComputeAndPrintAllInfoGained()
+	{
+		// Compute purity
+		ComputeAllInfoGained();
+		// Print purity
+		for (uint i = 0; i<num_var; i++)
+		{
+			printf("\n%u\t%10.9f", i, varData[i].InfoGaind);
+		}
+		return;
 	}
 
 private:
@@ -222,7 +279,6 @@ private:
 	SAMPLE_COUNTER num_sample;	// total number of sample in data set.
 	SAMPLE_CLASS *sample_class;	// sample_class[i]=j indicates that sample 'i' has the class label 'j'
 	uint ord_class;				// Ordinality of classes. How many class exist in total.
-
 								// variables to build the tree
 	NODE_ID max_num_node;	// maximum number of node that could exist on one level of tree (nodes at the same depth in the tree). The memory for the table is allocated base on this value. If max depth of tree is N and max ordinality of a variable is M then the suggested value is M^N.
 	NODE_ID num_node;		// number of nodes at current depth of tree.
@@ -231,7 +287,7 @@ private:
 	VAR_VALUE *var_value;	// var_value[i]=j indicates that for sample 'i' the value of the selected variable is 'j'
 	SAMPLE_COUNTER *table;	// table[(i*ord_calss)+j]=k indicates that there are 'k' samples labeled with class 'j' in the node with id 'i'. The table that holds the number of each class of samples in each node.
 
-							// variables to keep track of tree
+	// variables to keep track of tree
 	uint max_depth;	// maximum depth of tree. The memory for the arrays to hold variable id and ordinality at each depth is allocated based on this value.
 	uint depth;		// the current depth of tree.
 	TREE *tree;
@@ -249,6 +305,29 @@ private:
 	MEMORY_PLAN memory_plan;
 	UNCOMPRESSED_MEMORY *uncompressed_memory;
 
+	double sample_purity;	// the purity of samples originally
+
+	VAR_DATA *varData;
+
+	void TakeVariable(uint idx)
+	{
+		// based on memory plan load variable data
+		switch (memory_plan)
+		{
+		case memory:
+			tree[depth].var_id = idx;
+			tree[depth].ord_var = uncompressed_memory->ord[idx];
+			var_value = uncompressed_memory->GetVarValue(idx);
+			break;
+		case compressed_memory:
+			break;
+		case RASM:
+			break;
+		}
+
+		return;
+	}
+
 	void TakeRandomVariable()
 	{
 		// select a random variable
@@ -256,19 +335,8 @@ private:
 		rnd *= (uint)(rand());
 		rnd %= num_var;
 
-		// based on memory plan load variable data
-		switch (memory_plan)
-		{
-		case memory:
-			tree[depth].var_id = rnd;
-			tree[depth].ord_var = uncompressed_memory->ord[rnd];
-			var_value = uncompressed_memory->Get_Var_Value(rnd);
-			break;
-		case compressed_memory:
-			break;
-		case RASM:
-			break;
-		}
+		// take the random varaible
+		TakeVariable(rnd);
 
 		return;
 	}
@@ -302,6 +370,23 @@ private:
 		return;
 	}
 
+	void ComputeAllInfoGained()
+	{
+		// for every variable
+		for (uint i = 0; i<num_var; i++)
+		{
+			memset(tree, 0, sizeof(TREE) * 2);
+			memset(node_id, 0, sizeof(NODE_ID) * num_sample);
+			depth = 0;
+			num_node = 1;
+			// take a variable and split samples
+			TakeVariable(i);
+			SplitAndComputePurity();
+			varData[i].InfoGaind = tree[0].purity - sample_purity;
+		}
+		return;
+	}
+
 	void BuildTree()
 	{
 		memset(tree, 0, sizeof(TREE) * max_depth);
@@ -314,13 +399,12 @@ private:
 			// take a variable and split samples
 			TakeRandomVariable();
 			SplitAndComputePurity();
+			//if()
 		}
 		// print the purity of tree
 		//printf("\n");
 		//for (uint i = 0; i < max_depth; i++)
 		//	printf("%5.3f\t", tree[i].purity);
-		// finally store the tree
-		StoreTree();
 		return;
 	}
 
@@ -365,7 +449,7 @@ private:
 			uint end_idx = start_idx + ord_class;
 			// compute total number of samples in each node
 			double sum = 0;
-			for (int j = start_idx; j<end_idx; j++)
+			for (uint j = start_idx; j<end_idx; j++)
 				sum += table[j];
 
 			// if there is no sample in the node we skip the node
@@ -373,7 +457,7 @@ private:
 			{
 				// compute purity of the node
 				double node_purity = 0;
-				for (int j = start_idx; j<end_idx; j++)
+				for (uint j = start_idx; j<end_idx; j++)
 				{
 					double fij = table[j] / sum; // fraction of sample in node i with class j;
 					node_purity += (fij * fij);
@@ -424,7 +508,7 @@ void UniqueCombination(uint setSize, uint subsetSize, char printTree)
 
 			// for each of the next item first check if repeat exist
 			char flag = 0;
-			for (int j = 0; j < depth; j++)
+			for (uint j = 0; j < depth; j++)
 				flag |= TABLE(subset[j], i);
 			// if repeat exist check for next element
 			if (flag)
@@ -435,7 +519,7 @@ void UniqueCombination(uint setSize, uint subsetSize, char printTree)
 			else // if there where no repeat
 			{
 				// flag all new repeats
-				for (int j = 0; j < depth; j++)
+				for (uint j = 0; j < depth; j++)
 					TABLE(subset[j], i) = 1;
 
 				// add new element into subset
@@ -449,7 +533,7 @@ void UniqueCombination(uint setSize, uint subsetSize, char printTree)
 					if (printTree == 'Y')
 					{
 						printf("\n");
-						for (int k = 0; k < depth; k++)
+						for (uint k = 0; k < depth; k++)
 							printf("%u\t", subset[k]);
 					}
 					//and also reset for building new tree
@@ -466,7 +550,7 @@ void UniqueCombination(uint setSize, uint subsetSize, char printTree)
 			if (printTree == 'Y')
 			{
 				printf("\n");
-				for (int k = 0; k < depth; k++)
+				for (uint k = 0; k < depth; k++)
 					printf("%u\t", subset[k]);
 			}
 		}
@@ -535,18 +619,26 @@ void ComputeNumberOfPossibleTree(ulint setSize, ulint subsetSize)
 	printf("\n%llu\t%llu\t%llu\t%llu", setSize, subsetSize, CompeleteTree, InCompeleteTree);
 }
 
+void PrintHelp(char *progName)
+{
+	printf(">>> Usage: %s G/A/U/C/P\n", progName);
+	printf(">>> G: random dataset Generation\n");
+	printf(">>> A: Analysis\n");
+	printf(">>> U: Unique combinations\n");
+	printf(">>> C: Compute Number of possible tree\n");
+	printf(">>> P: Compute purity of all variables\n");
+	return;
+}
+
 int main(int argc, char *argv[])
 {
 
 	if (argc<2)
 	{
-		printf(">>> Usage: %s G/A/U/C\n", argv[0]);
-		printf(">>> G: random dataset Generation\n");
-		printf(">>> A: Analysis\n");
-		printf(">>> U: Unique combinations\n");
-		printf(">>> C: Compute Number of possible tree\n");
+		PrintHelp(argv[0]);
 		return 0;
 	}
+
 	switch (argv[1][0])
 	{
 		case 'G':
@@ -561,6 +653,8 @@ int main(int argc, char *argv[])
 			uint num_sample = atoi(argv[3]);
 			UNCOMPRESSED_MEMORY vds;
 			vds.FillRandom(num_var, num_sample, 3);
+			vds.ComputeSamplePurity();
+			Printf("\nComputed Sample Purity: %10.9f", vds.sample_purity);
 			vds.StoreToFile(argv[4]);
 			Printf("\nSimulation End.");
 			break;
@@ -576,7 +670,7 @@ int main(int argc, char *argv[])
 			vds.LoadFromFile(argv[2]);
 			CORE core;
 			uint thread_id = 0;
-			core.Init(vds.num_sample, vds.sample_class, 2, atoi(argv[3]), atoi(argv[4]), vds.num_var, 3, memory, &vds, argv[6], thread_id);
+			core.Init(vds.num_sample, vds.sample_class, 2, vds.sample_purity, atoi(argv[3]), atoi(argv[4]), vds.num_var, 3, memory, &vds, argv[6], thread_id);
 			Printf("\nBuilding Forest ");
 			core.BuildForest(atoi(argv[5]));
 			break;
@@ -601,9 +695,28 @@ int main(int argc, char *argv[])
 			ComputeNumberOfPossibleTree(atoi(argv[2]), atoi(argv[3]));
 			break;
 		}
+		case 'P':
+		{
+			if (argc<3)
+			{
+				printf(">>> Usage: %s P file_name max_depth tree_per_file num_tree tree_file_prefix\n", argv[0]);
+				return 0;
+			}
+			UNCOMPRESSED_MEMORY vds;
+			vds.LoadFromFile(argv[2]);
+			CORE core;
+			uint thread_id = 0;
+			char dummy[10];
+			strcpy(dummy, "DUMMY");
+			core.Init(vds.num_sample, vds.sample_class, 2, vds.sample_purity, 3, 0, vds.num_var, 3, memory, &vds, dummy, thread_id);
+			Printf("\nComputing purity of all variable");
+			core.ComputeAndPrintAllInfoGained();
+			break;
+		}
 		default:
 		{
-			printf(">>> Usage: %s G/A (G for random dataset Generation/ A for analysis)\n", argv[0]);
+
+			PrintHelp(argv[0]);
 		}
 	}
 	Printf("\n");
