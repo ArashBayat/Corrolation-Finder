@@ -46,6 +46,11 @@ typedef struct
 	double sumInfoGained;	// total amount of InfoGained by this variable in tree
 	uint numInfoGained;		// number of time this varibale is used in forest.
 	char var_name[MAX_VAR_NAME_LEN];
+	void print()
+	{
+		printf("\n%s\t%10.9f\t%10.9f\t%u\t%10.9f", var_name, InfoGaind, sumInfoGained/numInfoGained, numInfoGained, sumInfoGained);
+	}
+
 } VAR_DATA;
 
 typedef struct T_UNCOMPRESSED_MEMORY
@@ -236,6 +241,8 @@ public:
 		num_var = a_num_var;
 
 		varData = new VAR_DATA[num_var];
+		NULL_CHECK(varData);
+		memset(varData, 0, sizeof(VAR_DATA) * num_var);
 
 		sample_purity = a_sample_purity;
 
@@ -255,10 +262,21 @@ public:
 
 	void BuildForest(uint num_tree)
 	{
+		Printf("\nCompute purity of all variable ");
+		ComputeAllInfoGained();
+		
+		Printf("\nBuilding trees ");
 		for (uint i = 0; i < num_tree; i++)
 		{
 			BuildTree();
 			StoreTree();
+		}
+
+		for (uint i = 0; i<num_var; i++)
+		{
+			sprintf(varData[i].var_name, "VAR_%08u", i);
+			if(varData[i].numInfoGained)
+				varData[i].print();
 		}
 	}
 
@@ -399,7 +417,20 @@ private:
 			// take a variable and split samples
 			TakeRandomVariable();
 			SplitAndComputePurity();
-			//if()
+			// keep track of all information gained by a variable
+			if (depth == 0)
+			{
+				varData[tree[depth].var_id].sumInfoGained += tree[depth].purity - sample_purity;
+			}
+			else
+			{
+				varData[tree[depth].var_id].sumInfoGained += tree[depth].purity - tree[depth - 1].purity;
+			}
+
+			varData[tree[depth].var_id].numInfoGained++;
+
+			// increase the depth of the tree
+			depth++;
 		}
 		// print the purity of tree
 		//printf("\n");
@@ -468,9 +499,6 @@ private:
 		}
 		
 		PrintfD("\n var_id %u Purity %f", tree[depth].var_id, tree[depth].purity);
-		
-		// increase the depth of the tree
-		depth++;
 
 		// the number of node is changed now
 		num_node = num_node_next;
