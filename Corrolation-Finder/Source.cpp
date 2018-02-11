@@ -26,6 +26,7 @@ typedef char VAR_VALUE;			// the data type to keep the value of each variable
 typedef char VAR_ORD;			// the data type to keep ordinality of variables.
 typedef unsigned int SAMPLE_COUNTER;		// the data type to keep number of samples
 typedef unsigned int uint;
+typedef unsigned long long int ulint;
 
 typedef enum
 {
@@ -478,14 +479,72 @@ void UniqueCombination(uint setSize, uint subsetSize, char printTree)
 	delete[] table;
 }
 
+ulint power(ulint b, ulint p)
+{
+	ulint ret = 1;
+	for (ulint i = 0; i < p; i++)
+	{
+		ret *= b;
+	}
+	return ret;
+}
+
+void ComputeNumberOfPossibleTree(ulint setSize, ulint subsetSize)
+{
+	ulint i = 0;
+	ulint CompeleteTree = 0;
+	ulint InCompeleteTree = 0;
+
+	ulint n = setSize;
+	ulint m = subsetSize;
+	printf("\ni\tA\tterm\t(A*term)\tSub\tTree");
+	while (true)
+	{
+		ulint inSigma = 0;
+		for (int j = 0; j <= i; j++)
+			inSigma += power(m - 1, j);
+
+		ulint termx = (n > inSigma) ? (n - inSigma) : n;
+		ulint term = termx / (m - 1);
+
+		int incompeleteFlag;
+		if ((term * (m - 1)) != termx)
+			incompeleteFlag = 1;
+
+		ulint A = power(m - 1, i);
+
+		if (n > A)
+		{
+			CompeleteTree += A * term;
+			if (incompeleteFlag)
+				InCompeleteTree += A;
+			n -= A;
+			printf("\n%10llu\t%10llu\t%10llu\t%10llu\t%10llu\t%10llu", i, A, term, (A*term), inSigma, CompeleteTree);
+		}
+		else
+		{
+			CompeleteTree += n * term;
+			if (incompeleteFlag)
+				InCompeleteTree += n;
+			printf("\n%10llu\t%10llu\t%10llu\t%10llu\t%10llu\t%10llu", i, n, term, (n*term), inSigma, CompeleteTree);
+			break;
+		}
+		i++;
+	}
+	printf("\nTotal");
+	printf("\n%llu\t%llu\t%llu\t%llu", setSize, subsetSize, CompeleteTree, InCompeleteTree);
+}
+
 int main(int argc, char *argv[])
 {
+
 	if (argc<2)
 	{
-		printf(">>> Usage: %s G/A/U\n", argv[0]);
+		printf(">>> Usage: %s G/A/U/C\n", argv[0]);
 		printf(">>> G: random dataset Generation\n");
 		printf(">>> A: Analysis\n");
 		printf(">>> U: Unique combinations\n");
+		printf(">>> C: Compute Number of possible tree\n");
 		return 0;
 	}
 	switch (argv[1][0])
@@ -530,6 +589,16 @@ int main(int argc, char *argv[])
 				return 0;
 			}
 			UniqueCombination(atoi(argv[2]), atoi(argv[3]), argv[4][0]);
+			break;
+		}
+		case 'C':
+		{
+			if (argc<4)
+			{
+				printf(">>> Usage: %s C setSize subsetSize\n", argv[0]);
+				return 0;
+			}
+			ComputeNumberOfPossibleTree(atoi(argv[2]), atoi(argv[3]));
 			break;
 		}
 		default:
