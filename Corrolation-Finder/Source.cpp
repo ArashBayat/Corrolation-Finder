@@ -39,19 +39,52 @@ typedef enum
 	RASM						// random access to records with sequential access to file
 } MEMORY_PLAN;
 
-#define MAX_VAR_NAME_LEN 32
+#define MAX_FILE_NAME_LEN 4096
+
+#define MAX_NAME_LEN 32
+typedef struct
+{
+	char name[MAX_NAME_LEN];
+} NAME;
+
 typedef struct
 {
 	double InfoGaind;		// InfoGaind independently by this value
 	double sumInfoGained;	// total amount of InfoGained by this variable in tree
 	uint numInfoGained;		// number of time this varibale is used in forest.
-	char var_name[MAX_VAR_NAME_LEN];
-	void print()
+	void print(char *varName)
 	{
-		printf("\n%s\t%10.9f\t%10.9f\t%u\t%10.9f", var_name, InfoGaind, sumInfoGained/numInfoGained, numInfoGained, sumInfoGained);
+		printf("\n%s\t%10.9f\t%10.9f\t%u\t%10.9f", varName, InfoGaind, sumInfoGained/numInfoGained, numInfoGained, sumInfoGained);
 	}
 
 } VAR_DATA;
+
+ulint FILE_SIZE(char *fileName)
+{
+	FILE *f = fopen(fileName, "r");
+	NULL_CHECK(f);
+	fseek(f, 0L, SEEK_END);
+	ulint size = ftell(f);
+	fclose(f);
+	return size;
+}
+
+ulint FILE_LINE(char *fileName)
+{
+	FILE *f = fopen(fileName, "r");
+	NULL_CHECK(f);
+	int ch = 0;
+	ulint lines = 0;
+
+	lines++;
+	while ((ch = fgetc(f)) != EOF)
+	{
+		if (ch == '\n')
+			lines++;
+	}
+	fclose(f);
+	return lines;
+}
 
 typedef struct T_UNCOMPRESSED_MEMORY
 {
@@ -61,6 +94,9 @@ typedef struct T_UNCOMPRESSED_MEMORY
 	VAR_VALUE *data;		// keep value for each variable (it is a 2D array see Get_Var_Value())
 	VAR_ORD *ord;			// ordinallity of each variable
 	SAMPLE_CLASS *sample_class; // class labels for samples
+
+	NAME *varName;
+	NAME *sampleName;
 
 	uint ord_class;				// Ordinality of classes. How many class exist in total.
 	double sample_purity;		// purity of samples
@@ -99,11 +135,83 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		NULL_CHECK(ord);
 		sample_class = new SAMPLE_CLASS[num_sample];
 		NULL_CHECK(sample_class);
+		sampleName = new NAME[num_sample];
+		NULL_CHECK(sampleName);
+		varName = new NAME[num_var];
+		NULL_CHECK(varName);
 
 		// fill random value for variables
 		for (uint i = 0; i<num_var; i++)
 		{
 			ord[i] = a_ord;
+			for (uint j = 0; j<num_sample; j++)
+				data[(i * num_sample) + j] = rand() % ord[i];
+			sprintf(varName[i].name, "VAR_%010u", i);
+		}
+
+		ord_class = 2;
+		// assign random class for samples
+		for (uint i = 0; i<num_sample; i++)
+		{
+			sample_class[i] = rand() % 2;
+			sprintf(sampleName[i].name, "SAMPEL_%010u", i);
+		}
+	}
+
+	// this function fill read VCF data variables are one byte
+	void ParseTable(char *prefix)
+	{
+		char fileName[MAX_FILE_NAME_LEN];
+
+		// count number of samples and read sample names
+		sprintf(fileName, "%s.Sample", prefix);
+		num_sample = FILE_LINE(fileName) - 1;
+		sampleName = new NAME[num_sample];
+		NULL_CHECK(sampleName);
+		Printf("\nThere are %u samples in %s", num_sample, fileName);
+		FILE *fsam = fopen(fileName, "r");
+		NULL_CHECK(fsam);
+		for (uint i = 0; i < num_sample; i++)
+		{
+			fscanf(fsam, "%s", sampleName[i].name);
+			sampleName[i].name[MAX_FILE_NAME_LEN - 1] = NULL;
+		}
+		fclose(fsam);
+
+
+		// count number of sites and read site names
+		sprintf(fileName, "%s.Site", prefix);
+		num_var = FILE_LINE(fileName) - 1;
+		varName = new NAME[num_var];
+		NULL_CHECK(varName);
+		Printf("\nThere are %u sites in %s", num_var, fileName);
+		FILE *fvar = fopen(fileName, "r");
+		NULL_CHECK(fvar);
+		for (uint i = 0; i < num_var; i++)
+		{
+			fscanf(fvar, "%s", varName[i].name);
+			//varName[i].name[MAX_FILE_NAME_LEN - 1] = NULL;
+		}
+		fclose(fvar);
+
+		ulint gt = (ulint)num_sample * num_var; // number of genotype should exist in Genotype file
+		
+		sprintf(fileName, "%s.GT", prefix);
+		ulint num_gt = FILE_SIZE(fileName);
+		Printf("\nThere are %llu genotypes in %s (%u*%u=%llu)", num_gt, fileName, num_sample, num_var, gt);
+		return;
+		// allocate memory
+		data = new VAR_VALUE[num_var * num_sample];
+		NULL_CHECK(data);
+		ord = new VAR_ORD[num_var];
+		NULL_CHECK(ord);
+		sample_class = new SAMPLE_CLASS[num_sample];
+		NULL_CHECK(sample_class);
+
+		// fill random value for variables
+		for (uint i = 0; i<num_var; i++)
+		{
+			//ord[i] = a_ord;
 			for (uint j = 0; j<num_sample; j++)
 				data[(i * num_sample) + j] = rand() % ord[i];
 		}
@@ -122,6 +230,8 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		fwrite(this->data, sizeof(VAR_VALUE), (num_var * num_sample), file);
 		fwrite(this->ord, sizeof(VAR_ORD), (num_var), file);
 		fwrite(this->sample_class, sizeof(SAMPLE_CLASS), (num_sample), file);
+		fwrite(this->sampleName, sizeof(NAME), (num_sample), file);
+		fwrite(this->varName, sizeof(NAME), (num_var), file);
 	}
 
 	void LoadFromFile(const char *file_name)
@@ -136,10 +246,16 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		NULL_CHECK(ord);
 		sample_class = new SAMPLE_CLASS[num_sample];
 		NULL_CHECK(sample_class);
+		sampleName = new NAME[num_sample];
+		NULL_CHECK(sampleName);
+		varName = new NAME[num_var];
+		NULL_CHECK(varName);
 
 		fread(this->data, sizeof(VAR_VALUE), (num_var * num_sample), file);
 		fread(this->ord, sizeof(VAR_ORD), (num_var), file);
 		fread(this->sample_class, sizeof(SAMPLE_CLASS), (num_sample), file);
+		fread(this->sampleName, sizeof(NAME), (num_sample), file);
+		fread(this->varName, sizeof(NAME), (num_var), file);
 	}
 
 	~T_UNCOMPRESSED_MEMORY()
@@ -147,13 +263,15 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		delete[] data;
 		delete[] ord;
 		delete[] sample_class;
+		delete[] varName;
+		delete[] sampleName;
 	}
 } UNCOMPRESSED_MEMORY;
 
 typedef struct
 {
 	uint ord_var;	// tree[i].ord_var=j indicates that variable used in depth 'i' to split data has the ordinality of 'j'. Thus the value of the variable is between 0 and (ord_var[i]-1)
-	uint var_id;		// tree[i].var_id=j indicates that id of variable used in depth 'i' to split samples is 'j'.
+	uint var_id;	// tree[i].var_id=j indicates that id of variable used in depth 'i' to split samples is 'j'.
 	double purity;	// tree[i].purity=j indicates that the purity of tree in depth 'i' is 'j'.
 } TREE;
 
@@ -186,6 +304,8 @@ public:
 		uncompressed_memory = NULL;
 		varData = NULL;
 		sample_purity = 0;
+		varName = NULL;
+		sampleName = NULL;
 	}
 
 	~CORE()
@@ -233,7 +353,7 @@ public:
 		num_tree_per_file = a_num_tree_per_file;
 		num_stored_tree = num_tree_per_file; // this is to force opening the first file when storing a tree in file.
 
-		if (strlen(prefix) >= 4096)
+		if (strlen(prefix) >= MAX_FILE_NAME_LEN)
 			Error("Tree prefix file name is too long. Use shorter path (max 4095 characters)");
 		strcpy(tree_file_name_prefix, prefix);
 		thread_id = a_thread_id;
@@ -251,6 +371,8 @@ public:
 		{
 		case memory:
 			uncompressed_memory = (UNCOMPRESSED_MEMORY *)a_dataset;
+			varName = uncompressed_memory->varName;
+			sampleName = uncompressed_memory->sampleName;
 			break;
 		case compressed_memory:
 			break;
@@ -274,9 +396,9 @@ public:
 
 		for (uint i = 0; i<num_var; i++)
 		{
-			sprintf(varData[i].var_name, "VAR_%08u", i);
+			//sprintf(varData[i], "VAR_%08u", i);
 			if(varData[i].numInfoGained)
-				varData[i].print();
+				varData[i].print(varName[i].name);
 		}
 	}
 
@@ -322,6 +444,9 @@ private:
 	uint num_var;				// total number of variable in data set
 	MEMORY_PLAN memory_plan;
 	UNCOMPRESSED_MEMORY *uncompressed_memory;
+
+	NAME *varName;
+	NAME *sampleName;
 
 	double sample_purity;	// the purity of samples originally
 
@@ -649,12 +774,13 @@ void ComputeNumberOfPossibleTree(ulint setSize, ulint subsetSize)
 
 void PrintHelp(char *progName)
 {
-	printf(">>> Usage: %s G/A/U/C/P\n", progName);
+	printf(">>> Usage: %s G/A/U/C/P/T\n", progName);
 	printf(">>> G: random dataset Generation\n");
 	printf(">>> A: Analysis\n");
 	printf(">>> U: Unique combinations\n");
 	printf(">>> C: Compute Number of possible tree\n");
 	printf(">>> P: Compute purity of all variables\n");
+	printf(">>> T: Load table (VCF2Table.sh) and store it in VDS format \n");
 	return;
 }
 
@@ -681,6 +807,22 @@ int main(int argc, char *argv[])
 			uint num_sample = atoi(argv[3]);
 			UNCOMPRESSED_MEMORY vds;
 			vds.FillRandom(num_var, num_sample, 3);
+			vds.ComputeSamplePurity();
+			Printf("\nComputed Sample Purity: %10.9f", vds.sample_purity);
+			vds.StoreToFile(argv[4]);
+			Printf("\nSimulation End.");
+			break;
+		}
+		case 'T':
+		{
+			if (argc<3)
+			{
+				printf(">>> Usage: %s T prefix (generated by VCF2Table.sh)\n", argv[0]);
+				return 0;
+			}
+			Printf("\nSimulation Started.");
+			UNCOMPRESSED_MEMORY vds;
+			vds.ParseTable(argv[2]);
 			vds.ComputeSamplePurity();
 			Printf("\nComputed Sample Purity: %10.9f", vds.sample_purity);
 			vds.StoreToFile(argv[4]);
