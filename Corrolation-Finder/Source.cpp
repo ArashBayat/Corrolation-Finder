@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define Error(X) {printf("*** ERROR: %s (line:%u - File %s)\n", X, __LINE__, __FILE__); exit(0);}
 #define NULL_CHECK(X) {if(!X) {printf("*** ERROR: %s is null (line:%u - File %s)\n", #X, __LINE__, __FILE__); exit(0);}}
@@ -161,11 +162,16 @@ typedef struct T_UNCOMPRESSED_MEMORY
 	// this function fill read VCF data variables are one byte
 	void ParseTable(char *prefix)
 	{
+		if (sizeof(VAR_VALUE) != 1)
+		{
+			Error("This function only works when var value type is one byte");
+		}
+
 		char fileName[MAX_FILE_NAME_LEN];
 
 		// count number of samples and read sample names
 		sprintf(fileName, "%s.Sample", prefix);
-		num_sample = FILE_LINE(fileName) - 1;
+		num_sample = (SAMPLE_COUNTER) FILE_LINE(fileName) - 1;
 		sampleName = new NAME[num_sample];
 		NULL_CHECK(sampleName);
 		Printf("\nThere are %u samples in %s", num_sample, fileName);
@@ -174,14 +180,12 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		for (uint i = 0; i < num_sample; i++)
 		{
 			fscanf(fsam, "%s", sampleName[i].name);
-			sampleName[i].name[MAX_FILE_NAME_LEN - 1] = NULL;
 		}
 		fclose(fsam);
 
-
 		// count number of sites and read site names
 		sprintf(fileName, "%s.Site", prefix);
-		num_var = FILE_LINE(fileName) - 1;
+		num_var = (uint) FILE_LINE(fileName) - 1;
 		varName = new NAME[num_var];
 		NULL_CHECK(varName);
 		Printf("\nThere are %u sites in %s", num_var, fileName);
@@ -190,7 +194,6 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		for (uint i = 0; i < num_var; i++)
 		{
 			fscanf(fvar, "%s", varName[i].name);
-			//varName[i].name[MAX_FILE_NAME_LEN - 1] = NULL;
 		}
 		fclose(fvar);
 
@@ -199,32 +202,93 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		sprintf(fileName, "%s.GT", prefix);
 		ulint num_gt = FILE_SIZE(fileName);
 		Printf("\nThere are %llu genotypes in %s (%u*%u=%llu)", num_gt, fileName, num_sample, num_var, gt);
-		return;
-		// allocate memory
-		data = new VAR_VALUE[num_var * num_sample];
+		if (gt != num_gt)
+		{
+			Error("Number of genotypes does not match number of samples and variants");
+		}
+		
+		// read genotype file
+		data = new VAR_VALUE[num_gt];
 		NULL_CHECK(data);
+		FILE *fgt = fopen(fileName, "rb");
+		NULL_CHECK(fgt);
+		fread(data, 1, num_gt, fgt);
+		// can be improved by SSE
+		for (ulint i = 0; i < num_gt; i++)
+		{
+			data[i] -= '0';
+		}
+
 		ord = new VAR_ORD[num_var];
 		NULL_CHECK(ord);
+		for (uint i = 0; i < num_var; i++)
+		{
+			ord[i] = 3;
+		}
+
+		return;
+	}
+
+	void SimLabelNoCorrolation(uint num_rand_site, char *prefix)
+	{
+		ord_class = 2;
+
 		sample_class = new SAMPLE_CLASS[num_sample];
 		NULL_CHECK(sample_class);
 
-		// fill random value for variables
-		for (uint i = 0; i<num_var; i++)
-		{
-			//ord[i] = a_ord;
-			for (uint j = 0; j<num_sample; j++)
-				data[(i * num_sample) + j] = rand() % ord[i];
-		}
+		uint *rnd = new uint[num_rand_site];
+		NULL_CHECK(rnd);
 
-		ord_class = 2;
-		// assign random class for samples
-		for (uint i = 0; i<num_sample; i++)
-			sample_class[i] = rand() % 2;
+		// select variant for simulation
+		for (uint i = 0; i < num_rand_site; i++)
+			rnd[i] = rand() % num_var;
+
+		uint num_labeled = 0;
+
+		for (uint i = 0; i < num_sample; i++)
+		{
+			sample_class[i] = 0;
+			for(uint j=0; j<num_rand_site; j++)
+				if (data[(rnd[j] * num_sample) + i] != 0) // if it is not homoref
+				{
+					sample_class[i] = 1;
+					num_labeled++;
+					break;
+				}
+		}
+		
+		Printf("\nNumber of labled sample: %u", num_labeled);
+
+		char fileName[MAX_FILE_NAME_LEN];
+
+		// writing labels
+		sprintf(fileName, "%s.sim.csv", prefix);
+		FILE *fsim = fopen(fileName, "w");
+		fprintf(fsim, "Sample,label\n");
+		for (uint i = 0; i < num_sample; i++)
+		{
+			fprintf(fsim, "%s,%u\n", sampleName[i].name, sample_class[i]);
+		}
+		fclose(fsim);
+
+		// writing selected variants
+		sprintf(fileName, "%s.sim.var", prefix);
+		FILE *fvar = fopen(fileName, "w");\
+		fprintf(fvar, "index\tCHR_POS_ALT\n");
+		for (uint i = 0; i < num_rand_site; i++)
+		{
+			fprintf(fvar, "%u\t%s\n", rnd[i], varName[rnd[i]].name);
+		}
+		fclose(fvar);
+		
+		delete[] rnd;
 	}
 
-	void StoreToFile(const char *file_name)
+	void StoreToFile(const char *prefix)
 	{
-		FILE *file = fopen(file_name, "wb");
+		char fn[MAX_FILE_NAME_LEN];
+		sprintf(fn, "%s.vds", prefix);
+		FILE *file = fopen(fn, "wb");
 		NULL_CHECK(file);
 		fwrite(this, sizeof(T_UNCOMPRESSED_MEMORY), 1, file);
 		fwrite(this->data, sizeof(VAR_VALUE), (num_var * num_sample), file);
@@ -234,9 +298,11 @@ typedef struct T_UNCOMPRESSED_MEMORY
 		fwrite(this->varName, sizeof(NAME), (num_var), file);
 	}
 
-	void LoadFromFile(const char *file_name)
+	void LoadFromFile(const char *prefix)
 	{
-		FILE *file = fopen(file_name, "rb");
+		char fn[MAX_FILE_NAME_LEN];
+		sprintf(fn, "%s.vds", prefix);
+		FILE *file = fopen(fn, "rb");
 		NULL_CHECK(file);
 		fread(this, sizeof(T_UNCOMPRESSED_MEMORY), 1, file);
 
@@ -793,13 +859,15 @@ int main(int argc, char *argv[])
 		return 0;
 	}
 
+	srand(time(NULL));
+
 	switch (argv[1][0])
 	{
 		case 'G':
 		{
 			if (argc<4)
 			{
-				printf(">>> Usage: %s G num_var num_samples file_name(ord_var is 3, ord_class is 2)\n", argv[0]);
+				printf(">>> Usage: %s G num_var num_samples prefix(ord_var is 3, ord_class is 2)\n", argv[0]);
 				return 0;
 			}
 			Printf("\nSimulation Started.");
@@ -815,17 +883,19 @@ int main(int argc, char *argv[])
 		}
 		case 'T':
 		{
-			if (argc<3)
+			if (argc<5)
 			{
-				printf(">>> Usage: %s T prefix (generated by VCF2Table.sh)\n", argv[0]);
+				printf(">>> Usage: %s T table_prefix out_prefix num_associated_var (table generated by VCF2Table.sh)\n", argv[0]);
 				return 0;
 			}
-			Printf("\nSimulation Started.");
 			UNCOMPRESSED_MEMORY vds;
+			Printf("\nParse table file.");
 			vds.ParseTable(argv[2]);
+			Printf("\nSimulation of phenotype.");
+			vds.SimLabelNoCorrolation(atoi(argv[4]), argv[3]);
 			vds.ComputeSamplePurity();
 			Printf("\nComputed Sample Purity: %10.9f", vds.sample_purity);
-			vds.StoreToFile(argv[4]);
+			vds.StoreToFile(argv[3]);
 			Printf("\nSimulation End.");
 			break;
 		}
@@ -833,7 +903,7 @@ int main(int argc, char *argv[])
 		{
 			if (argc<7)
 			{
-				printf(">>> Usage: %s A file_name max_depth tree_per_file num_tree tree_file_prefix\n", argv[0]);
+				printf(">>> Usage: %s A prefix max_depth tree_per_file num_tree tree_file_prefix\n", argv[0]);
 				return 0;
 			}
 			UNCOMPRESSED_MEMORY vds;
