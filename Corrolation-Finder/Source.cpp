@@ -444,6 +444,7 @@ typedef struct
 	uint ord_var;	// tree[i].ord_var=j indicates that variable used in depth 'i' to split data has the ordinality of 'j'. Thus the value of the variable is between 0 and (ord_var[i]-1)
 	uint var_id;	// tree[i].var_id=j indicates that id of variable used in depth 'i' to split samples is 'j'.
 	double purity;	// tree[i].purity=j indicates that the purity of tree in depth 'i' is 'j'.
+	double antiRand; // to avoid the efffect of random spliting at the buttom of tree
 } TREE;
 
 class CORE
@@ -729,10 +730,11 @@ private:
 			// in the below formula the second term should be simplified by the purity of variable
 			if (depth != 0)
 			{
-				double diff_purity = tree[depth].purity - (varData[tree[depth].var_id].InfoGaind + sample_purity);
-				if (diff_purity < 0)
-					fprintf(stderr, "\nError %f %f %f", tree[depth].purity, (varData[tree[depth].var_id].InfoGaind + sample_purity), diff_purity);
-				varData[tree[depth].var_id].sumInfoGained += power(diff_purity, 4);
+				double InfoGained = tree[depth].purity - tree[depth-1].purity;
+				InfoGained *= InfoGained;
+				InfoGained *= InfoGained;
+				InfoGained *= tree[depth].antiRand;
+				varData[tree[depth].var_id].sumInfoGained += InfoGained;
 				varData[tree[depth].var_id].numInfoGained++;
 			}
 			// increase the depth of the tree
@@ -778,7 +780,8 @@ private:
 
 		// compute purity of the sample at the current depth of tree
 		tree[depth].purity = 0;
-
+		tree[depth].antiRand = 0;
+		uint num_non_empty_node = 0;
 		// for each node
 		for (uint i = 0; i<num_node_next; i++)
 		{
@@ -792,6 +795,8 @@ private:
 			// if there is no sample in the node we skip the node
 			if (sum > 0)
 			{
+				tree[depth].antiRand += sum * sum;
+				num_non_empty_node++;
 				// compute purity of the node
 				double node_purity = 0;
 				for (uint j = start_idx; j<end_idx; j++)
@@ -803,6 +808,8 @@ private:
 				tree[depth].purity += (sum / num_sample) * node_purity;
 			}
 		}
+
+		tree[depth].antiRand /= num_non_empty_node;
 		
 		PrintfD("\n var_id %u Purity %f", tree[depth].var_id, tree[depth].purity);
 
@@ -927,14 +934,14 @@ void ComputeNumberOfPossibleTree(ulint setSize, ulint subsetSize)
 			if (incompeleteFlag)
 				InCompeleteTree += A;
 			n -= A;
-			printf("\n%10llu\t%10llu\t%10llu\t%10llu\t%10llu\t%10llu", i, A, term, (A*term), inSigma, CompeleteTree);
+			//printf("\n%10llu\t%10llu\t%10llu\t%10llu\t%10llu\t%10llu", i, A, term, (A*term), inSigma, CompeleteTree);
 		}
 		else
 		{
 			CompeleteTree += n * term;
 			if (incompeleteFlag)
 				InCompeleteTree += n;
-			printf("\n%10llu\t%10llu\t%10llu\t%10llu\t%10llu\t%10llu", i, n, term, (n*term), inSigma, CompeleteTree);
+			//printf("\n%10llu\t%10llu\t%10llu\t%10llu\t%10llu\t%10llu", i, n, term, (n*term), inSigma, CompeleteTree);
 			break;
 		}
 		i++;
